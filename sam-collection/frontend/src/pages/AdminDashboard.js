@@ -2,25 +2,6 @@ import { useState, useEffect } from 'react';
 import { getDashboard, getUsers, blockUser, getPendingProducts, approveProduct, getAllOrders, getCoupons, createCoupon, toggleCoupon, deleteCoupon, getAllProducts } from '../services/api';
 import { toast } from 'react-toastify';
 
-// ---- Theme tokens (synced to src/App.css :root variables) ----
-const THEME = {
-  primary: '#4a5d53',      // --navy
-  primaryDark: '#3d4d44',  // darker navy for contrast accents
-  secondary: '#6b7d73',    // --navy-light
-  accent: '#c2b2a3',       // --gold
-  accentDark: '#a89484',   // darker gold for contrast accents
-  cream: '#e2e4e1',        // --cream
-  creamDark: '#ced4d0',    // --gray-200
-  white: '#ffffff',
-  textDark: '#4a5d53',     // --navy
-  textMuted: '#8b9691',    // --gray-500
-  border: '#ced4d0',       // --gray-200
-  danger: '#a35a5a',       // --red
-  dangerLight: '#b97878',
-  success: '#688f7a',      // --green
-  warning: '#b7893f',
-};
-
 const BACKEND_URL = "http://localhost:5000";
 
 const getProductImageUrl = (img) => {
@@ -30,6 +11,31 @@ const getProductImageUrl = (img) => {
   const path = cleanPath.startsWith('uploads/') ? cleanPath : `uploads/${cleanPath}`;
   return `${BACKEND_URL}/${path}`;
 };
+
+const statusBadgeClass = (status) => {
+  if (status === 'delivered') return 'badge-green';
+  if (status === 'processing') return 'badge-gold';
+  if (status === 'shipped') return 'badge-navy';
+  if (status === 'cancelled') return 'badge-red';
+  return 'badge-yellow';
+};
+
+const roleBadgeClass = (role) => {
+  if (role === 'admin') return 'badge-navy';
+  if (role === 'seller') return 'badge-gold';
+  return 'badge-muted';
+};
+
+const initials = (name) => (name || '?').trim().split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+
+const NAV_ITEMS = [
+  { key: 'dashboard', label: 'Dashboard', icon: '\u2302' },
+  { key: 'users', label: 'Users', icon: '\u25A4' },
+  { key: 'pending', label: 'Pending', icon: '\u23F3' },
+  { key: 'products', label: 'Products', icon: '\u25A6' },
+  { key: 'orders', label: 'Orders', icon: '\u25A3' },
+  { key: 'coupons', label: 'Coupons', icon: '\u2731' },
+];
 
 const AdminDashboard = () => {
   const [tab, setTab] = useState('dashboard');
@@ -47,17 +53,16 @@ const AdminDashboard = () => {
 
   const loadDashboard = async () => {
     try {
-      const [dashboardRes, ordersRes] = await Promise.all([
+      const [dashboardRes, ordersRes, usersRes] = await Promise.all([
         getDashboard(),
-        getAllOrders()
+        getAllOrders(),
+        getUsers().catch(() => ({ data: [] }))
       ]);
 
-      // Get dashboard stats
       const dashboardData = dashboardRes.data?.data || dashboardRes.data || {};
-
-      // Calculate revenue from delivered orders only
       const allOrders = ordersRes.data?.data || ordersRes.data || [];
       const ordersArray = Array.isArray(allOrders) ? allOrders : [];
+      const allUsers = Array.isArray(usersRes.data) ? usersRes.data : usersRes.data?.users || [];
 
       const deliveredRevenue = ordersArray
         .filter(order => order.status === 'delivered')
@@ -74,12 +79,15 @@ const AdminDashboard = () => {
         totalOrders: ordersArray.length,
         deliveredOrders: ordersArray.filter(order => order.status === 'delivered').length,
         pendingOrders: ordersArray.filter(order => order.status === 'pending').length,
-        processingOrders: ordersArray.filter(order => order.status === 'processing').length
+        processingOrders: ordersArray.filter(order => order.status === 'processing').length,
+        shippedOrders: ordersArray.filter(order => order.status === 'shipped').length,
       });
+
+      setOrders(ordersArray);
+      setUsers(allUsers);
 
     } catch (err) {
       console.error('Error loading dashboard:', err);
-      // Fallback: try just dashboard API
       try {
         const r = await getDashboard();
         const data = r.data?.data || r.data || {};
@@ -174,7 +182,7 @@ const AdminDashboard = () => {
     if (t === 'orders') loadOrders();
     if (t === 'coupons') loadCoupons();
     if (t === 'products') loadProducts();
-    if (t === 'dashboard') loadDashboard(); // Refresh dashboard stats
+    if (t === 'dashboard') loadDashboard();
   };
 
   const currentUser = JSON.parse(localStorage.getItem('user') || 'null');
@@ -275,661 +283,402 @@ const AdminDashboard = () => {
     }
   };
 
+  const statusCounts = [
+    { label: 'Pending', count: stats.pendingOrders || 0 },
+    { label: 'Processing', count: stats.processingOrders || 0 },
+    { label: 'Shipped', count: stats.shippedOrders || 0 },
+    { label: 'Delivered', count: stats.deliveredOrders || 0 },
+  ];
+  const maxStatusCount = Math.max(1, ...statusCounts.map(s => s.count));
+  const recentOrders = [...orders]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 5);
+  const recentUsers = [...users]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 5);
+
   return (
-    <div className="admin-page" style={{ background: THEME.cream, minHeight: '100vh', padding: '30px' }}>
-      <h1 style={{ color: THEME.primary, letterSpacing: '0.5px', marginBottom: '25px' }}>Admin Dashboard</h1>
-      <div className="admin-tabs" style={{
-        display: 'flex',
-        gap: '10px',
-        marginBottom: '30px',
-        borderBottom: `2px solid ${THEME.border}`,
-        paddingBottom: '10px',
-        flexWrap: 'wrap'
-      }}>
-        {['dashboard', 'users', 'pending', 'products', 'orders', 'coupons'].map(t => (
-          <button
-            key={t}
-            className={tab === t ? 'active' : ''}
-            onClick={() => handleTab(t)}
-            style={{
-              padding: '10px 20px',
-              border: tab === t ? 'none' : `1px solid ${THEME.border}`,
-              background: tab === t ? THEME.primary : THEME.white,
-              color: tab === t ? THEME.white : THEME.textMuted,
-              borderRadius: '20px',
-              cursor: 'pointer',
-              fontWeight: tab === t ? '600' : '400',
-              transition: 'all 0.3s ease',
-              textTransform: 'capitalize'
-            }}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'dashboard' && (
-        <>
-          <div className="stats-grid" style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-            gap: '20px',
-            marginBottom: '30px'
-          }}>
-            <div className="stat-card" style={{
-              background: THEME.primary,
-              color: THEME.white,
-              padding: '25px',
-              borderRadius: '10px',
-              boxShadow: '0 4px 10px rgba(74,93,83,0.25)'
-            }}>
-              <h3 style={{ marginTop: '0', fontSize: '14px', opacity: '0.85', fontWeight: '400', letterSpacing: '0.5px', textTransform: 'uppercase' }}>Total Users</h3>
-              <p style={{ fontSize: '32px', fontWeight: 'bold', margin: '10px 0' }}>{stats.users || 0}</p>
-            </div>
-
-            <div className="stat-card" style={{
-              background: THEME.secondary,
-              color: THEME.white,
-              padding: '25px',
-              borderRadius: '10px',
-              boxShadow: '0 4px 10px rgba(107,128,115,0.25)'
-            }}>
-              <h3 style={{ marginTop: '0', fontSize: '14px', opacity: '0.85', fontWeight: '400', letterSpacing: '0.5px', textTransform: 'uppercase' }}>Total Products</h3>
-              <p style={{ fontSize: '32px', fontWeight: 'bold', margin: '10px 0' }}>{stats.products || 0}</p>
-            </div>
-
-            <div className="stat-card" style={{
-              background: THEME.accent,
-              color: THEME.textDark,
-              padding: '25px',
-              borderRadius: '10px',
-              boxShadow: '0 4px 10px rgba(201,168,118,0.35)'
-            }}>
-              <h3 style={{ marginTop: '0', fontSize: '14px', opacity: '0.75', fontWeight: '400', letterSpacing: '0.5px', textTransform: 'uppercase' }}>Total Orders</h3>
-              <p style={{ fontSize: '32px', fontWeight: 'bold', margin: '10px 0' }}>{stats.orders || 0}</p>
-            </div>
-
-            <div className="stat-card" style={{
-              background: THEME.primaryDark,
-              color: THEME.white,
-              padding: '25px',
-              borderRadius: '10px',
-              boxShadow: '0 4px 10px rgba(58,74,66,0.3)'
-            }}>
-              <h3 style={{ marginTop: '0', fontSize: '14px', opacity: '0.85', fontWeight: '400', letterSpacing: '0.5px', textTransform: 'uppercase' }}>Revenue (Delivered)</h3>
-              <p style={{ fontSize: '32px', fontWeight: 'bold', margin: '10px 0' }}>
-                PKR {(stats.revenue || 0).toLocaleString()}
-              </p>
-            </div>
-          </div>
-
-          {/* Additional Stats */}
-          <div className="stats-grid" style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '20px'
-          }}>
-            <div className="stat-card" style={{
-              background: THEME.white,
-              padding: '20px',
-              borderRadius: '10px',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
-              border: `1px solid ${THEME.border}`
-            }}>
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: THEME.textMuted, fontWeight: '400', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Delivered Orders</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold', margin: '0', color: THEME.success }}>
-                {stats.deliveredOrders || 0}
-              </p>
-            </div>
-
-            <div className="stat-card" style={{
-              background: THEME.white,
-              padding: '20px',
-              borderRadius: '10px',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
-              border: `1px solid ${THEME.border}`
-            }}>
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: THEME.textMuted, fontWeight: '400', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Processing Orders</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold', margin: '0', color: THEME.accentDark }}>
-                {stats.processingOrders || 0}
-              </p>
-            </div>
-
-            <div className="stat-card" style={{
-              background: THEME.white,
-              padding: '20px',
-              borderRadius: '10px',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
-              border: `1px solid ${THEME.border}`
-            }}>
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: THEME.textMuted, fontWeight: '400', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Orders</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold', margin: '0', color: THEME.warning }}>
-                {stats.pendingOrders || 0}
-              </p>
-            </div>
-
-            <div className="stat-card" style={{
-              background: THEME.white,
-              padding: '20px',
-              borderRadius: '10px',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
-              border: `1px solid ${THEME.border}`
-            }}>
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: THEME.textMuted, fontWeight: '400', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Revenue</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold', margin: '0', color: THEME.secondary }}>
-                PKR {(stats.pendingRevenue || 0).toLocaleString()}
-              </p>
-            </div>
-          </div>
-        </>
-      )}
-
-      {tab === 'users' && (
-        <div style={{ overflowX: 'auto' }}>
-          <table className="admin-table" style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            background: THEME.white,
-            borderRadius: '8px',
-            overflow: 'hidden',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.06)'
-          }}>
-            <thead>
-              <tr style={{ background: THEME.primary, color: THEME.white }}>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Name</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Email</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Role</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Status</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.length > 0 ? users.map(u => (
-                <tr key={u._id} style={{ borderBottom: `1px solid ${THEME.border}` }}>
-                  <td style={{ padding: '12px', color: THEME.textDark }}>{u.name}</td>
-                  <td style={{ padding: '12px', color: THEME.textDark }}>{u.email}</td>
-                  <td style={{ padding: '12px' }}>
-                    <span style={{
-                      padding: '4px 10px',
-                      borderRadius: '12px',
-                      background: u.role === 'admin' ? THEME.primary : u.role === 'seller' ? THEME.accent : THEME.secondary,
-                      color: u.role === 'seller' ? THEME.textDark : THEME.white,
-                      fontSize: '12px',
-                      fontWeight: '600'
-                    }}>
-                      {u.role}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px' }}>
-                    <span className={u.isBlocked ? 'badge-red' : 'badge-green'} style={{
-                      padding: '4px 10px',
-                      borderRadius: '12px',
-                      background: u.isBlocked ? THEME.danger : THEME.success,
-                      color: THEME.white,
-                      fontSize: '12px',
-                      fontWeight: '600'
-                    }}>
-                      {u.isBlocked ? 'Blocked' : 'Active'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px' }}>
-                    {u._id === currentUserId ? (
-                      <span style={{
-                        padding: '6px 14px',
-                        borderRadius: '5px',
-                        background: THEME.creamDark,
-                        color: THEME.textMuted,
-                        fontWeight: '600',
-                        fontSize: '13px'
-                      }}>
-                        This is you
-                      </span>
-                    ) : (
-                      <button
-                        className="btn-sm"
-                        onClick={() => handleBlock(u._id)}
-                        style={{
-                          padding: '6px 14px',
-                          border: 'none',
-                          borderRadius: '5px',
-                          background: u.isBlocked ? THEME.success : THEME.danger,
-                          color: THEME.white,
-                          cursor: 'pointer',
-                          fontWeight: '600'
-                        }}
-                      >
-                        {u.isBlocked ? 'Unblock' : 'Block'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: THEME.textMuted }}>
-                    No users found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {tab === 'pending' && (
-        <div className="pending-list" style={{
-          display: 'grid',
-          gap: '15px'
-        }}>
-          {pending.length > 0 ? pending.map(p => (
-            <div key={p._id} className="pending-card" style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '20px',
-              background: THEME.white,
-              borderRadius: '8px',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-              border: `1px solid ${THEME.border}`
-            }}>
-              <div>
-                <h4 style={{ margin: '0 0 5px 0', color: THEME.textDark }}>{p.name}</h4>
-                <p style={{ margin: '0', color: THEME.textMuted }}>By: {p.seller?.name || 'Unknown'}</p>
-                <p style={{ margin: '5px 0 0 0', fontWeight: 'bold', color: THEME.primary }}>
-                  PKR {p.price?.toLocaleString()}
-                </p>
-              </div>
-              <button
-                className="btn-primary btn-sm"
-                onClick={() => handleApprove(p._id)}
-                style={{
-                  padding: '8px 22px',
-                  background: THEME.accent,
-                  color: THEME.textDark,
-                  border: 'none',
-                  borderRadius: '20px',
-                  cursor: 'pointer',
-                  fontWeight: '600'
-                }}
-              >
-                Approve
-              </button>
-            </div>
-          )) : (
-            <div style={{ textAlign: 'center', padding: '40px', color: THEME.textMuted }}>
-              No pending products
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === 'products' && (
-        <div className="products-management">
-          <h2 style={{ marginBottom: '20px', color: THEME.primary }}>Manage Products - Featured Status</h2>
-          {!Array.isArray(products) || products.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: THEME.textMuted }}>
-              <p>No products found or loading...</p>
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table className="admin-table" style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                background: THEME.white,
-                borderRadius: '8px',
-                overflow: 'hidden',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.06)'
-              }}>
-                <thead>
-                  <tr style={{ background: THEME.primary, color: THEME.white }}>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Image</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Product Name</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Category</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Price</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Seller</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Featured</th>
-                    <th style={{ padding: '12px', textAlign: 'left' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.map(p => (
-                    <tr key={p._id} style={{ borderBottom: `1px solid ${THEME.border}` }}>
-                      <td style={{ padding: '10px' }}>
-                        {p.images && p.images[0] ? (
-                          <img
-                            src={getProductImageUrl(p.images[0])}
-                            alt={p.name}
-                            style={{
-                              width: '50px',
-                              height: '50px',
-                              objectFit: 'cover',
-                              borderRadius: '4px'
-                            }}
-                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-                          />
-                        ) : null}
-                        <div style={{
-                          width: '50px',
-                          height: '50px',
-                          background: THEME.creamDark,
-                          borderRadius: '4px',
-                          display: p.images && p.images[0] ? 'none' : 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '12px',
-                          color: THEME.textMuted
-                        }}>
-                          No img
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px', fontWeight: '500', color: THEME.textDark }}>{p.name}</td>
-                      <td style={{ padding: '10px', color: THEME.textDark }}>{p.category || 'N/A'}</td>
-                      <td style={{ padding: '10px', fontWeight: '600', color: THEME.textDark }}>PKR {p.price?.toLocaleString()}</td>
-                      <td style={{ padding: '10px', fontSize: '14px', color: THEME.textMuted }}>{p.seller?.name || 'Unknown'}</td>
-                      <td style={{ padding: '10px' }}>
-                        <span style={{
-                          padding: '4px 12px',
-                          borderRadius: '12px',
-                          fontSize: '12px',
-                          fontWeight: '600',
-                          background: p.isFeatured ? THEME.accent : THEME.creamDark,
-                          color: p.isFeatured ? THEME.textDark : THEME.textMuted
-                        }}>
-                          {p.isFeatured ? 'Featured' : 'Not Featured'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px' }}>
-                        <button
-                          onClick={() => handleToggleFeatured(p._id)}
-                          style={{
-                            padding: '6px 16px',
-                            borderRadius: '5px',
-                            border: 'none',
-                            background: p.isFeatured ? THEME.danger : THEME.primary,
-                            color: THEME.white,
-                            cursor: 'pointer',
-                            fontWeight: '600',
-                            fontSize: '14px',
-                            transition: 'all 0.3s ease'
-                          }}
-                        >
-                          {p.isFeatured ? 'Remove Featured' : 'Set Featured'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === 'orders' && (
-        <div style={{ overflowX: 'auto' }}>
-          <p style={{ color: THEME.textMuted, fontSize: '13px', marginBottom: '12px' }}>
-            Order status is updated by the seller fulfilling the order. This view is read-only for admins.
-          </p>
-          <table className="admin-table" style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            background: THEME.white,
-            borderRadius: '8px',
-            overflow: 'hidden',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.06)'
-          }}>
-            <thead>
-              <tr style={{ background: THEME.primary, color: THEME.white }}>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Order ID</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Customer</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Total</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Seller</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.length > 0 ? orders.map(o => (
-                <tr key={o._id} style={{ borderBottom: `1px solid ${THEME.border}` }}>
-                  <td style={{ padding: '12px', fontFamily: 'monospace', color: THEME.textDark }}>#{o._id?.slice(-6)}</td>
-                  <td style={{ padding: '12px', color: THEME.textDark }}>{o.user?.name || 'Unknown'}</td>
-                  <td style={{ padding: '12px', fontWeight: '600', color: THEME.textDark }}>PKR {o.totalPrice?.toLocaleString()}</td>
-                  <td style={{ padding: '12px', color: THEME.textMuted, fontSize: '14px' }}>
-                    {[...new Set((o.orderItems || []).map(i => i.seller?.name || i.product?.seller?.name).filter(Boolean))].join(', ') || '—'}
-                  </td>
-                  <td style={{ padding: '12px' }}>
-                    <span style={{
-                      padding: '4px 10px',
-                      borderRadius: '12px',
-                      background:
-                        o.status === 'delivered' ? THEME.success :
-                        o.status === 'processing' ? THEME.accentDark :
-                        o.status === 'shipped' ? THEME.secondary :
-                        o.status === 'cancelled' ? THEME.danger : THEME.warning,
-                      color: THEME.white,
-                      fontSize: '12px',
-                      fontWeight: '600'
-                    }}>
-                      {o.status}
-                    </span>
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: THEME.textMuted }}>
-                    No orders found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {tab === 'coupons' && (
-        <div className="coupons-section">
-          <form className="coupon-form" onSubmit={handleCreateCoupon} style={{
-            background: THEME.white,
-            padding: '25px',
-            borderRadius: '10px',
-            marginBottom: '30px',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-            border: `1px solid ${THEME.border}`
-          }}>
-            <h3 style={{ marginTop: '0', color: THEME.primary }}>Create New Coupon</h3>
-            <div className="form-row" style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: '15px',
-              marginBottom: '20px'
-            }}>
-              <input
-                placeholder="Code (e.g. SAVE10)"
-                value={couponForm.code}
-                onChange={e => setCouponForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
-                required
-                style={{
-                  padding: '10px',
-                  border: `1px solid ${THEME.border}`,
-                  borderRadius: '5px',
-                  color: THEME.textDark
-                }}
-              />
-              <select
-                value={couponForm.discountType}
-                onChange={e => setCouponForm(p => ({ ...p, discountType: e.target.value }))}
-                style={{
-                  padding: '10px',
-                  border: `1px solid ${THEME.border}`,
-                  borderRadius: '5px',
-                  color: THEME.textDark,
-                  background: THEME.white
-                }}
-              >
-                <option value="percentage">Percentage (%)</option>
-                <option value="fixed">Fixed (PKR)</option>
-              </select>
-              <input
-                type="number"
-                placeholder="Discount value"
-                value={couponForm.discountValue}
-                onChange={e => setCouponForm(p => ({ ...p, discountValue: e.target.value }))}
-                required
-                style={{
-                  padding: '10px',
-                  border: `1px solid ${THEME.border}`,
-                  borderRadius: '5px',
-                  color: THEME.textDark
-                }}
-              />
-              <input
-                type="number"
-                placeholder="Min order (PKR)"
-                value={couponForm.minOrderAmount}
-                onChange={e => setCouponForm(p => ({ ...p, minOrderAmount: e.target.value }))}
-                style={{
-                  padding: '10px',
-                  border: `1px solid ${THEME.border}`,
-                  borderRadius: '5px',
-                  color: THEME.textDark
-                }}
-              />
-              <input
-                type="number"
-                placeholder="Max uses (blank = unlimited)"
-                value={couponForm.maxUses}
-                onChange={e => setCouponForm(p => ({ ...p, maxUses: e.target.value }))}
-                style={{
-                  padding: '10px',
-                  border: `1px solid ${THEME.border}`,
-                  borderRadius: '5px',
-                  color: THEME.textDark
-                }}
-              />
-              <input
-                type="date"
-                placeholder="Expires at"
-                value={couponForm.expiresAt}
-                onChange={e => setCouponForm(p => ({ ...p, expiresAt: e.target.value }))}
-                style={{
-                  padding: '10px',
-                  border: `1px solid ${THEME.border}`,
-                  borderRadius: '5px',
-                  color: THEME.textDark
-                }}
-              />
-            </div>
+    <div className="dash-shell">
+      <aside className="dash-sidebar">
+        <div className="dash-sidebar-logo">SAS <span>Admin</span></div>
+        <nav className="dash-nav">
+          {NAV_ITEMS.map(item => (
             <button
-              className="btn-primary btn-sm"
-              type="submit"
-              style={{
-                padding: '10px 28px',
-                background: THEME.primary,
-                color: THEME.white,
-                border: 'none',
-                borderRadius: '20px',
-                cursor: 'pointer',
-                fontWeight: '600'
-              }}
+              key={item.key}
+              className={tab === item.key ? 'active' : ''}
+              onClick={() => handleTab(item.key)}
             >
-              Create Coupon
+              <span className="dash-nav-icon">{item.icon}</span>
+              {item.label}
             </button>
-          </form>
+          ))}
+        </nav>
+        <div className="dash-sidebar-footer">
+          <button onClick={() => { localStorage.removeItem('user'); window.location.href = '/login'; }}>
+            <span className="dash-nav-icon">{'\u2190'}</span>
+            Logout
+          </button>
+        </div>
+      </aside>
 
-          <div style={{ overflowX: 'auto' }}>
-            <table className="admin-table" style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              background: THEME.white,
-              borderRadius: '8px',
-              overflow: 'hidden',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.06)'
-            }}>
-              <thead>
-                <tr style={{ background: THEME.primary, color: THEME.white }}>
-                  <th style={{ padding: '12px', textAlign: 'left' }}>Code</th>
-                  <th style={{ padding: '12px', textAlign: 'left' }}>Type</th>
-                  <th style={{ padding: '12px', textAlign: 'left' }}>Value</th>
-                  <th style={{ padding: '12px', textAlign: 'left' }}>Min Order</th>
-                  <th style={{ padding: '12px', textAlign: 'left' }}>Used / Max</th>
-                  <th style={{ padding: '12px', textAlign: 'left' }}>Expires</th>
-                  <th style={{ padding: '12px', textAlign: 'left' }}>Status</th>
-                  <th style={{ padding: '12px', textAlign: 'left' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {coupons.length > 0 ? coupons.map(c => (
-                  <tr key={c._id} style={{ borderBottom: `1px solid ${THEME.border}` }}>
-                    <td style={{ padding: '12px', color: THEME.textDark }}><strong>{c.code}</strong></td>
-                    <td style={{ padding: '12px', color: THEME.textDark }}>{c.discountType}</td>
-                    <td style={{ padding: '12px', color: THEME.textDark }}>
-                      {c.discountType === 'percentage' ? `${c.discountValue}%` : `PKR ${c.discountValue}`}
-                    </td>
-                    <td style={{ padding: '12px', color: THEME.textDark }}>
-                      {c.minOrderAmount ? `PKR ${c.minOrderAmount}` : '—'}
-                    </td>
-                    <td style={{ padding: '12px', color: THEME.textDark }}>
-                      {c.usedCount || 0} / {c.maxUses ?? '∞'}
-                    </td>
-                    <td style={{ padding: '12px', color: THEME.textDark }}>
-                      {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : '—'}
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      <span style={{
-                        padding: '4px 10px',
-                        borderRadius: '12px',
-                        background: c.isActive ? THEME.success : THEME.danger,
-                        color: THEME.white,
-                        fontSize: '12px',
-                        fontWeight: '600'
-                      }}>
-                        {c.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      <button
-                        className="btn-sm"
-                        onClick={() => handleToggleCoupon(c._id)}
-                        style={{
-                          padding: '6px 12px',
-                          marginRight: '5px',
-                          border: 'none',
-                          borderRadius: '5px',
-                          background: c.isActive ? THEME.warning : THEME.success,
-                          color: THEME.white,
-                          cursor: 'pointer',
-                          fontWeight: '600'
-                        }}
-                      >
-                        {c.isActive ? 'Disable' : 'Enable'}
-                      </button>
-                      <button
-                        className="btn-sm btn-danger"
-                        onClick={() => handleDeleteCoupon(c._id)}
-                        style={{
-                          padding: '6px 12px',
-                          border: 'none',
-                          borderRadius: '5px',
-                          background: THEME.danger,
-                          color: THEME.white,
-                          cursor: 'pointer',
-                          fontWeight: '600'
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: THEME.textMuted }}>
-                      No coupons found
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+      <div className="dash-main">
+        <div className="dash-topbar">
+          <div className="dash-topbar-search">Search or type a command</div>
+          <div className="dash-topbar-actions">
+            <div className="dash-avatar">{initials(currentUser?.name)}</div>
           </div>
         </div>
-      )}
+
+        <div className="dash-content">
+          {tab === 'dashboard' && (
+            <>
+              <h1>Dashboard</h1>
+              <p className="dash-content-sub">Overview of your marketplace</p>
+
+              <div className="overview-row">
+                <div className="overview-pill">
+                  <div>
+                    <div className="overview-pill-label">Total Users</div>
+                    <div className="overview-pill-value">{stats.users || 0}</div>
+                  </div>
+                  <span className="overview-badge">Live</span>
+                </div>
+                <div className="overview-pill">
+                  <div>
+                    <div className="overview-pill-label">Revenue (Delivered)</div>
+                    <div className="overview-pill-value">PKR {(stats.revenue || 0).toLocaleString()}</div>
+                  </div>
+                  <span className="overview-badge">{stats.deliveredOrders || 0} orders</span>
+                </div>
+                <div className="overview-pill">
+                  <div>
+                    <div className="overview-pill-label">Total Products</div>
+                    <div className="overview-pill-value">{stats.products || 0}</div>
+                  </div>
+                </div>
+                <div className="overview-pill">
+                  <div>
+                    <div className="overview-pill-label">Pending Revenue</div>
+                    <div className="overview-pill-value">PKR {(stats.pendingRevenue || 0).toLocaleString()}</div>
+                  </div>
+                </div>
+              </div>
+
+              {recentUsers.length > 0 && (
+                <div className="avatar-row">
+                  {recentUsers.map(u => (
+                    <div className="avatar-item" key={u._id}>
+                      <div className="avatar-circle">{initials(u.name)}</div>
+                      <span>{u.name?.split(' ')[0]}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="dash-grid">
+                <div className="chart-card">
+                  <div className="chart-card-header">
+                    <h3>Orders by Status</h3>
+                  </div>
+                  <div className="bar-chart-row">
+                    {statusCounts.map(s => (
+                      <div key={s.label} className="bar-chart-col">
+                        <div className="bar-chart-bar" style={{ height: `${Math.max(6, (s.count / maxStatusCount) * 140)}px` }} />
+                        <span className="bar-chart-label">{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="side-panel">
+                    <h3>Recent Orders</h3>
+                    {recentOrders.length === 0 ? (
+                      <p className="text-muted" style={{ fontSize: '13px' }}>No orders yet</p>
+                    ) : recentOrders.map(o => (
+                      <div className="side-list-item" key={o._id}>
+                        <span>{o.user?.name || 'Unknown'}</span>
+                        <strong>PKR {o.totalPrice?.toLocaleString()}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="side-panel">
+                    <h3>Quick Stats</h3>
+                    <div className="side-list-item"><span>Pending Orders</span><strong className="text-warning">{stats.pendingOrders || 0}</strong></div>
+                    <div className="side-list-item"><span>Processing</span><strong>{stats.processingOrders || 0}</strong></div>
+                    <div className="side-list-item"><span>Delivered</span><strong className="text-success">{stats.deliveredOrders || 0}</strong></div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === 'users' && (
+            <>
+              <h1>Users</h1>
+              <p className="dash-content-sub">Manage all registered accounts</p>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.length > 0 ? users.map(u => (
+                      <tr key={u._id}>
+                        <td>{u.name}</td>
+                        <td>{u.email}</td>
+                        <td><span className={roleBadgeClass(u.role)}>{u.role}</span></td>
+                        <td><span className={u.isBlocked ? 'badge-red' : 'badge-green'}>{u.isBlocked ? 'Blocked' : 'Active'}</span></td>
+                        <td>
+                          {u._id === currentUserId ? (
+                            <span className="badge-muted">This is you</span>
+                          ) : (
+                            <button
+                              className={`btn-sm ${u.isBlocked ? '' : 'btn-danger'}`}
+                              onClick={() => handleBlock(u._id)}
+                            >
+                              {u.isBlocked ? 'Unblock' : 'Block'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan="5" style={{ textAlign: 'center', padding: '40px' }} className="text-muted">
+                          No users found
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {tab === 'pending' && (
+            <>
+              <h1>Pending Products</h1>
+              <p className="dash-content-sub">Review and approve new listings</p>
+              <div className="pending-list">
+                {pending.length > 0 ? pending.map(p => (
+                  <div key={p._id} className="pending-card">
+                    <div>
+                      <h4>{p.name}</h4>
+                      <p className="text-muted">By: {p.seller?.name || 'Unknown'}</p>
+                      <p className="text-navy" style={{ fontWeight: 'bold' }}>PKR {p.price?.toLocaleString()}</p>
+                    </div>
+                    <button className="btn-secondary btn-sm" onClick={() => handleApprove(p._id)}>Approve</button>
+                  </div>
+                )) : (
+                  <div className="empty-state"><p>No pending products</p></div>
+                )}
+              </div>
+            </>
+          )}
+
+          {tab === 'products' && (
+            <>
+              <h1>Products</h1>
+              <p className="dash-content-sub">Manage featured status across the marketplace</p>
+              {!Array.isArray(products) || products.length === 0 ? (
+                <div className="empty-state"><p>No products found or loading...</p></div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Image</th>
+                        <th>Product Name</th>
+                        <th>Category</th>
+                        <th>Price</th>
+                        <th>Seller</th>
+                        <th>Featured</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products.map(p => (
+                        <tr key={p._id}>
+                          <td>
+                            <div style={{ width: '48px', height: '48px', position: 'relative' }}>
+                              {p.images && p.images[0] ? (
+                                <img
+                                  src={getProductImageUrl(p.images[0])}
+                                  alt={p.name}
+                                  style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: 'var(--radius)', display: 'block' }}
+                                  onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                                />
+                              ) : null}
+                              <div style={{
+                                width: '48px', height: '48px', background: 'var(--gray-100)', borderRadius: 'var(--radius)',
+                                display: p.images && p.images[0] ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '11px', color: 'var(--gray-500)', position: p.images && p.images[0] ? 'absolute' : 'static', top: 0, left: 0
+                              }}>
+                                No img
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ fontWeight: '500' }}>{p.name}</td>
+                          <td>{p.category || 'N/A'}</td>
+                          <td style={{ fontWeight: '600' }}>PKR {p.price?.toLocaleString()}</td>
+                          <td className="text-muted">{p.seller?.name || 'Unknown'}</td>
+                          <td><span className={p.isFeatured ? 'badge-gold' : 'badge-muted'}>{p.isFeatured ? 'Featured' : 'Not Featured'}</span></td>
+                          <td>
+                            <button
+                              className={`btn-sm ${p.isFeatured ? 'btn-danger' : ''}`}
+                              onClick={() => handleToggleFeatured(p._id)}
+                            >
+                              {p.isFeatured ? 'Remove Featured' : 'Set Featured'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === 'orders' && (
+            <>
+              <h1>Orders</h1>
+              <p className="dash-content-sub">Order status is updated by the seller fulfilling the order. This view is read-only for admins.</p>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Order ID</th>
+                      <th>Customer</th>
+                      <th>Total</th>
+                      <th>Seller</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.length > 0 ? orders.map(o => (
+                      <tr key={o._id}>
+                        <td style={{ fontFamily: 'monospace' }}>#{o._id?.slice(-6)}</td>
+                        <td>{o.user?.name || 'Unknown'}</td>
+                        <td style={{ fontWeight: '600' }}>PKR {o.totalPrice?.toLocaleString()}</td>
+                        <td className="text-muted">
+                          {[...new Set((o.orderItems || []).map(i => i.seller?.name || i.product?.seller?.name).filter(Boolean))].join(', ') || '—'}
+                        </td>
+                        <td><span className={statusBadgeClass(o.status)}>{o.status}</span></td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan="5" style={{ textAlign: 'center', padding: '40px' }} className="text-muted">
+                          No orders found
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {tab === 'coupons' && (
+            <>
+              <h1>Coupons</h1>
+              <p className="dash-content-sub">Create and manage discount codes</p>
+              <form className="product-form" onSubmit={handleCreateCoupon} style={{ marginBottom: '30px' }}>
+                <h3 style={{ marginBottom: '20px' }}>Create New Coupon</h3>
+                <div className="form-row">
+                  <input
+                    placeholder="Code (e.g. SAVE10)"
+                    value={couponForm.code}
+                    onChange={e => setCouponForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
+                    required
+                  />
+                  <select
+                    value={couponForm.discountType}
+                    onChange={e => setCouponForm(p => ({ ...p, discountType: e.target.value }))}
+                  >
+                    <option value="percentage">Percentage (%)</option>
+                    <option value="fixed">Fixed (PKR)</option>
+                  </select>
+                  <input
+                    type="number"
+                    placeholder="Discount value"
+                    value={couponForm.discountValue}
+                    onChange={e => setCouponForm(p => ({ ...p, discountValue: e.target.value }))}
+                    required
+                  />
+                  <input
+                    type="number"
+                    placeholder="Min order (PKR)"
+                    value={couponForm.minOrderAmount}
+                    onChange={e => setCouponForm(p => ({ ...p, minOrderAmount: e.target.value }))}
+                  />
+                  <input
+                    type="number"
+                    placeholder="Max uses (blank = unlimited)"
+                    value={couponForm.maxUses}
+                    onChange={e => setCouponForm(p => ({ ...p, maxUses: e.target.value }))}
+                  />
+                  <input
+                    type="date"
+                    placeholder="Expires at"
+                    value={couponForm.expiresAt}
+                    onChange={e => setCouponForm(p => ({ ...p, expiresAt: e.target.value }))}
+                  />
+                </div>
+                <button className="btn-primary btn-sm" type="submit">Create Coupon</button>
+              </form>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Type</th>
+                      <th>Value</th>
+                      <th>Min Order</th>
+                      <th>Used / Max</th>
+                      <th>Expires</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {coupons.length > 0 ? coupons.map(c => (
+                      <tr key={c._id}>
+                        <td><strong>{c.code}</strong></td>
+                        <td>{c.discountType}</td>
+                        <td>{c.discountType === 'percentage' ? `${c.discountValue}%` : `PKR ${c.discountValue}`}</td>
+                        <td>{c.minOrderAmount ? `PKR ${c.minOrderAmount}` : '—'}</td>
+                        <td>{c.usedCount || 0} / {c.maxUses ?? '∞'}</td>
+                        <td>{c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : '—'}</td>
+                        <td><span className={c.isActive ? 'badge-green' : 'badge-red'}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
+                        <td>
+                          <div className="table-actions">
+                            <button className="btn-sm" onClick={() => handleToggleCoupon(c._id)}>{c.isActive ? 'Disable' : 'Enable'}</button>
+                            <button className="btn-sm btn-danger" onClick={() => handleDeleteCoupon(c._id)}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan="8" style={{ textAlign: 'center', padding: '40px' }} className="text-muted">
+                          No coupons found
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
