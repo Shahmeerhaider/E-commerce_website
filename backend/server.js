@@ -20,14 +20,36 @@ console.error('Database connection failed:', err);
 });
 
 // Middleware
+// CLIENT_URL can be a single URL or a comma-separated list, e.g.
+// "https://your-app.vercel.app,https://your-custom-domain.com"
+const explicitOrigins = (process.env.CLIENT_URL || '')
+  .split(',')
+  .map((s) => s.trim().replace(/\/$/, '')) // trim + drop trailing slash
+  .filter(Boolean);
+
+const allowedOrigins = [...explicitOrigins, 'http://localhost:3000'];
+
 app.use(
-cors({
-origin: [
-process.env.CLIENT_URL,
-'http://localhost:3000'
-].filter(Boolean),
-credentials: true
-})
+  cors({
+    origin: (origin, callback) => {
+      // No origin = server-to-server / curl / Postman — always allow
+      if (!origin) return callback(null, true);
+
+      const normalized = origin.replace(/\/$/, '');
+      const isExplicitlyAllowed = allowedOrigins.includes(normalized);
+      // Auto-allow any Vercel deployment (production + preview URLs), since
+      // preview URLs change per-branch and are impractical to list manually
+      const isVercelPreview = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalized);
+
+      if (isExplicitlyAllowed || isVercelPreview) {
+        return callback(null, true);
+      }
+
+      console.warn(`CORS blocked request from origin: ${origin}`);
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+  })
 );
 
 // Raised from Express's 100kb default — product submissions carry
