@@ -1,36 +1,57 @@
 const dns = require('dns');
-dns.setServers(['8.8.8.8', '8.8.4.4']); // Forces Node to bypass your ISP's blocked DNS
-
-
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
+
 const connectDB = require('./config/db');
 const seedInitialData = require('./config/seed');
 const { errorHandler } = require('./middleware/errorHandler');
 
-// Connect to MongoDB then seed
-connectDB().then(seedInitialData);
-
 const app = express();
-const path = require('path');
+
+// Connect MongoDB
+connectDB()
+.then(() => seedInitialData())
+.catch((err) => {
+console.error('Database connection failed:', err);
+});
 
 // Middleware
 app.use(
-  cors({
-    origin: [
-      process.env.CLIENT_URL,
-      'http://localhost:3000'
-    ],
-    credentials: true
-  })
+cors({
+origin: [
+process.env.CLIENT_URL,
+'http://localhost:3000'
+].filter(Boolean),
+credentials: true
+})
 );
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files for image uploads
+// Static uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Home Route
+app.get('/', (req, res) => {
+res.json({
+success: true,
+message: 'SAM Collection Backend Running'
+});
+});
+
+// Health Check
+app.get('/api/health', (req, res) => {
+res.json({
+status: 'ok',
+message: 'SAS Collection API running'
+});
+});
 
 // API Routes
 app.use('/api/auth', require('./routes/authRoutes'));
@@ -42,9 +63,7 @@ app.use('/api/wishlist', require('./routes/wishlistRoutes'));
 app.use('/api/payment', require('./routes/paymentRoutes'));
 app.use('/api/coupons', require('./routes/couponRoutes'));
 
-// Health check
-app.get('/api/health', (req, res) => res.json({ status: 'ok', message: 'SAS Collection API running' }));
-
 // Error Handler
 app.use(errorHandler);
+
 module.exports = app;
